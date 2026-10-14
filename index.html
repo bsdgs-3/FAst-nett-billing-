@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fast Net Pakpattan - Payment Sheet</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        table { border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 13px; }
+        th, td { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; white-space: nowrap; background-color: white; }
+        .table-container { max-height: calc(100vh - 100px); overflow-y: auto; position: relative; }
+        th { background-color: #1e3a8a !important; color: white; font-weight: bold; position: sticky; top: 0; z-index: 10; }
+        .unpaid-row td { background-color: #fee2e2 !important; color: #991b1b; }
+        .paid-row td { background-color: #d1fae5 !important; color: #065f46; }
+        .deactive-row td { background-color: #f1f5f9 !important; color: #64748b; }
+        .new-row td { background-color: #fef08a !important; }
+
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body class="bg-slate-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Sticky Control Bar -->
+    <header class="bg-slate-800 text-white px-4 py-3 flex flex-wrap justify-between items-center gap-3 shadow-md z-30 flex-shrink-0">
+        <div>
+            <h1 class="font-bold text-lg">Fast Net Pakpattan - Payment Sheet</h1>
+            <p class="text-xs text-slate-400">Dynamic Columns & Hide Months Option</p>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex items-center space-x-1 bg-slate-900 p-1 rounded-lg">
+            <button onclick="switchTab('active')" id="tabActiveBtn" class="px-4 py-1.5 rounded-md text-xs font-bold bg-blue-600 text-white transition">Active Users</button>
+            <button onclick="switchTab('deactive')" id="tabDeactiveBtn" class="px-4 py-1.5 rounded-md text-xs font-bold text-slate-400 hover:text-white transition">Deactive Users</button>
+        </div>
+
+        <div class="flex items-center space-x-2 flex-wrap gap-y-2">
+            <!-- Search ID/Name -->
+            <input type="text" id="searchInput" onkeyup="renderGrid()" placeholder="Search ID, Name..." class="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none w-32">
+            
+            <!-- Date Filter Picker -->
+            <div class="flex items-center bg-slate-700 border border-slate-600 rounded px-2 py-1 text-xs">
+                <i class="fa-solid fa-calendar-days text-amber-400 mr-1.5"></i>
+                <input type="number" id="dateFilterInput" oninput="renderGrid()" placeholder="Date (1-30)" min="1" max="30" class="w-16 bg-transparent text-white focus:outline-none text-center">
+                <button onclick="clearDateFilter()" title="Clear Date Filter" class="text-slate-400 hover:text-white ml-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Hide/Show Months Toggle -->
+            <button onclick="toggleMonths()" id="toggleMonthsBtn" class="bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow">
+                <i class="fa-solid fa-eye-slash mr-1"></i> <span id="toggleMonthsText">Hide Months</span>
+            </button>
+
+            <!-- Add Custom Column -->
+            <button onclick="addCustomColumn()" class="bg-purple-600 hover:bg-purple-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow">
+                <i class="fa-solid fa-columns mr-1"></i> + Add Column
+            </button>
+
+            <label class="bg-amber-600 hover:bg-amber-700 px-2.5 py-1.5 rounded text-xs font-semibold cursor-pointer shadow">
+                <i class="fa-solid fa-file-arrow-up mr-1"></i> Import
+                <input type="file" id="importFile" accept=".csv" class="hidden" onchange="importSmartCSV(event)">
+            </label>
+
+            <button onclick="addRowAtTop()" class="bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow"><i class="fa-solid fa-plus mr-1"></i> Add Row</button>
+            <button onclick="exportExcelCSV()" class="bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow"><i class="fa-solid fa-download mr-1"></i> Export</button>
+        </div>
+    </header>
+
+    <!-- Spreadsheet Container -->
+    <main class="flex-grow p-3 overflow-hidden flex flex-col">
+        <div class="bg-white shadow border border-slate-400 table-container flex-grow">
+            <table>
+                <thead>
+                    <tr id="tableHeaderRow">
+                        <!-- Dynamic headers rendered via JS -->
+                    </tr>
+                </thead>
+                <tbody id="excelTableBody">
+                    <!-- Rows generated dynamically -->
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <script>
+        let currentTab = 'active';
+        let newRowId = null;
+        let hideMonths = false;
+        
+        // Default custom columns list if not present in storage
+        let defaultColumns = [
+            { key: 'sep', label: 'Sep', type: 'text' },
+            { key: 'oct', label: 'Oct', type: 'text' },
+            { key: 'nov', label: 'Nov', type: 'text' },
+            { key: 'dec', label: 'Dec', type: 'text' }
+        ];
+
+        let customColumns = JSON.parse(localStorage.getItem('fastnet_custom_cols_v22')) || defaultColumns;
+        let sheetData = JSON.parse(localStorage.getItem('fastnet_excel_grid_v22')) || [
+            { id: Date.now(), sr: 1, userId: "sajid.ch", name: "Sajid Rasheed Academe", location: "Tibba", pkgDate: 21, pkg: "AN-10Mb", amount: "", sep: "", oct: "Paid", nov: "", dec: "", remarks: "", state: "active" }
+        ];
+
+        function switchTab(tab) {
+            currentTab = tab;
+            if(tab === 'active') {
+                document.getElementById('tabActiveBtn').className = "px-4 py-1.5 rounded-md text-xs font-bold bg-blue-600 text-white transition";
+                document.getElementById('tabDeactiveBtn').className = "px-4 py-1.5 rounded-md text-xs font-bold text-slate-400 hover:text-white transition";
+            } else {
+                document.getElementById('tabDeactiveBtn').className = "px-4 py-1.5 rounded-md text-xs font-bold bg-slate-600 text-white transition";
+                document.getElementById('tabActiveBtn').className = "px-4 py-1.5 rounded-md text-xs font-bold text-slate-400 hover:text-white transition";
+            }
+            renderGrid();
+        }
+
+        function clearDateFilter() {
+            document.getElementById('dateFilterInput').value = '';
+            renderGrid();
+        }
+
+        function toggleMonths() {
+            hideMonths = !hideMonths;
+            document.getElementById('toggleMonthsText').innerText = hideMonths ? "Show Months" : "Hide Months";
+            document.getElementById('toggleMonthsBtn').className = hideMonths ? "bg-teal-600 hover:bg-teal-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow" : "bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded text-xs font-semibold shadow";
+            renderGrid();
+        }
+
+        function addCustomColumn() {
+            let colName = prompt("Enter new column name (e.g. Jan, Status, Extra):");
+            if(!colName) return;
+            let cleanKey = colName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            
+            // Check duplicate
+            if(customColumns.some(c => c.key === cleanKey)) {
+                alert("Column already exists!");
+                return;
+            }
+
+            customColumns.push({ key: cleanKey, label: colName, type: 'text' });
+            localStorage.setItem('fastnet_custom_cols_v22', JSON.stringify(customColumns));
+            renderGrid();
+            alert(`Column "${colName}" added successfully!`);
+        }
+
+        function renderGrid() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const filterDateVal = document.getElementById('dateFilterInput').value.trim();
+            const theadTr = document.getElementById('tableHeaderRow');
+            const tbody = document.getElementById('excelTableBody');
+            
+            // 1. Render Table Headers Dynamically
+            let headerHTML = `
+                <th>Sr.No.</th>
+                <th>User ID</th>
+                <th>Customer Name</th>
+                <th>Location</th>
+                <th>Package Date</th>
+                <th>Package</th>
+                <th>P.Amount</th>
+            `;
+
+            if (!hideMonths) {
+                customColumns.forEach(col => {
+                    headerHTML += `<th class="relative group">${col.label} <button onclick="deleteColumn('${col.key}')" title="Delete Column" class="text-red-300 hover:text-red-100 ml-1 text-[10px]"><i class="fa-solid xmark fa-x"></i></button></th>`;
+                });
+            }
+
+            headerHTML += `
+                <th>Remarks</th>
+                <th class="text-center">Status Action</th>
+                <th class="text-center">Delete</th>
+            `;
+            theadTr.innerHTML = headerHTML;
+
+            // 2. Filter & Render Rows
+            tbody.innerHTML = '';
+            let filtered = sheetData.filter(row => {
+                const matchesTab = (row.state || 'active') === currentTab;
+                if (!matchesTab) return false;
+                if (filterDateVal !== '' && Number(row.pkgDate) !== Number(filterDateVal)) return false;
+                return true;
+            });
+
+            if(currentTab === 'active') {
+                filtered.sort((a, b) => {
+                    if (a.id === newRowId) return -1;
+                    if (b.id === newRowId) return 1;
+                    return (Number(a.pkgDate) || 0) - (Number(b.pkgDate) || 0);
+                });
+            }
+
+            filtered.forEach((row, displayIndex) => {
+                const idx = sheetData.indexOf(row);
+                if(search && !String(displayIndex + 1).includes(search) && !String(row.userId).toLowerCase().includes(search) && !row.name.toLowerCase().includes(search) && !row.location.toLowerCase().includes(search)) {
+                    return;
+                }
+
+                let rowClass = currentTab === 'deactive' ? 'deactive-row' : (row.oct && row.oct.toLowerCase() === 'paid' ? 'paid-row' : 'unpaid-row');
+                if (row.id === newRowId) rowClass = 'new-row';
+
+                let trHTML = `
+                    <td class="text-center font-bold">${displayIndex + 1}</td>
+                    <td><input type="text" value="${row.userId || ''}" onchange="updateCell(${idx}, 'userId', this.value)" class="w-28 bg-transparent border-0 font-mono font-bold focus:outline-none"></td>
+                    <td><input type="text" value="${row.name}" onchange="updateCell(${idx}, 'name', this.value)" class="w-48 bg-transparent border-0 focus:outline-none font-semibold"></td>
+                    <td><input type="text" value="${row.location}" onchange="updateCell(${idx}, 'location', this.value)" class="w-36 bg-transparent border-0 focus:outline-none"></td>
+                    <td class="text-center"><input type="number" value="${row.pkgDate !== undefined ? row.pkgDate : ''}" onchange="updatePkgDate(${idx}, this.value)" class="w-12 text-center bg-transparent border-0 font-bold focus:outline-none" placeholder="Date"></td>
+                    <td><input type="text" value="${row.pkg}" onchange="updateCell(${idx}, 'pkg', this.value)" class="w-20 bg-transparent border-0 focus:outline-none font-medium"></td>
+                    <td class="text-right"><input type="number" value="${row.amount !== undefined ? row.amount : ''}" onchange="updateCell(${idx}, 'amount', this.value)" class="w-20 text-right bg-transparent border font-bold text-blue-900 bg-white/50" placeholder="Amount"></td>
+                `;
+
+                if (!hideMonths) {
+                    customColumns.forEach(col => {
+                        let val = row[col.key] || '';
+                        let isOct = col.key === 'oct';
+                        trHTML += `<td><input type="text" value="${val}" onchange="updateCell(${idx}, '${col.key}', this.value)" class="w-20 text-center bg-transparent border ${isOct ? 'font-bold' : ''}" placeholder="${isOct ? 'Paid/Unpaid' : ''}"></td>`;
+                    });
+                }
+
+                trHTML += `
+                    <td><input type="text" value="${row.remarks || ''}" onchange="updateCell(${idx}, 'remarks', this.value)" class="w-32 bg-transparent border-0 text-xs" placeholder="Remarks..."></td>
+                    <td class="text-center">
+                        <button onclick="toggleState(${idx})" class="${currentTab === 'active' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'} text-white text-xs px-2.5 py-1 rounded font-semibold shadow">
+                            ${currentTab === 'active' ? 'Deactive' : 'Activate'}
+                        </button>
+                    </td>
+                    <td class="text-center"><button onclick="deleteRow(${idx})" class="text-red-600 hover:text-red-800"><i class="fa-solid fa-trash"></i></button></td>
+                `;
+
+                const tr = document.createElement('tr');
+                tr.className = rowClass;
+                tr.innerHTML = trHTML;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function deleteColumn(key) {
+            if(confirm(`Delete column "${key}" permanently?`)) {
+                customColumns = customColumns.filter(c => c.key !== key);
+                localStorage.setItem('fastnet_custom_cols_v22', JSON.stringify(customColumns));
+                renderGrid();
+            }
+        }
+
+        function addRowAtTop() {
+            const rowUniqueId = Date.now();
+            newRowId = rowUniqueId;
+            let newRowObj = {
+                id: rowUniqueId,
+                sr: 1,
+                userId: "",
+                name: "New Customer",
+                location: "",
+                pkgDate: "",
+                pkg: "AN-10Mb",
+                amount: "",
+                remarks: "",
+                state: currentTab
+            };
+            customColumns.forEach(c => newRowObj[c.key] = "");
+            
+            sheetData.unshift(newRowObj);
+            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            renderGrid();
+        }
+
+        function updatePkgDate(idx, val) {
+            sheetData[idx].pkgDate = Number(val) || 1;
+            if (sheetData[idx].id === newRowId) {
+                newRowId = null;
+            }
+            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            renderGrid();
+        }
+
+        function toggleState(idx) {
+            sheetData[idx].state = (sheetData[idx].state || 'active') === 'active' ? 'deactive' : 'active';
+            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            renderGrid();
+        }
+
+        function updateCell(idx, field, val) {
+            sheetData[idx][field] = val;
+            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            renderGrid();
+        }
+
+        function deleteRow(idx) {
+            if(confirm("Delete this row permanently?")) {
+                if (sheetData[idx].id === newRowId) newRowId = null;
+                sheetData.splice(idx, 1);
+                localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+                renderGrid();
+            }
+        }
+
+        function parseCSV(text) {
+            let p = '', row = [''], ret = [row], i = 0, r = 0, s = !0;
+            for (let l of text) {
+                if (l === '"') {
+                    if (s && l === p) row[row.length - 1] += '"';
+                    s = !s;
+                } else if (l === ',' && s) {
+                    row.push('');
+                } else if (l === '\r' && s) {
+                    // skip
+                } else if (l === '\n' && s) {
+                    ret.push(row = ['']);
+                    r++;
+                } else {
+                    row[row.length - 1] += l;
+                }
+                p = l;
+            }
+            return ret;
+        }
+
+        function importSmartCSV(event) {
+            const file = event.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                const rows = parseCSV(text);
+                if(rows.length < 2) return;
+
+                const header = rows[0].map(h => h.toLowerCase().trim());
+                
+                let idxUser = header.findIndex(h => h.includes('user') || h.includes('username') || h.includes('id'));
+                let idxName = header.findIndex(h => h.includes('name') || h.includes('full') || h.includes('customer') || h.includes('description'));
+                let idxAddr = header.findIndex(h => h.includes('address') || h.includes('location') || h.includes('area') || h.includes('place'));
+                let idxPkg  = header.findIndex(h => h.includes('service') || h.includes('package') || h.includes('plan') || h.includes('profile'));
+                let idxExp  = header.findIndex(h => h.includes('exp') || h.includes('date') || h.includes('valid') || h.includes('time'));
+
+                if(idxUser === -1) idxUser = 1;
+                if(idxName === -1) idxName = 2;
+                if(idxAddr === -1) idxAddr = 4;
+                if(idxPkg === -1)  idxPkg = 8;
+                if(idxExp === -1)  idxExp = 9;
+
+                let count = 0;
+                sheetData = [];
+                newRowId = null;
+
+                for(let i=1; i<rows.length; i++) {
+                    const cols = rows[i];
+                    if(!cols || cols.length < 2) continue;
+                    
+                    const userId = (cols[idxUser] || '').trim();
+                    const name = (cols[idxName] || '').trim();
+                    const address = (cols[idxAddr] || '').trim();
+                    const pkg = (cols[idxPkg] || 'AN-10Mb').trim();
+                    const exp = (cols[idxExp] || '').trim();
+
+                    if(!userId && !name) continue;
+
+                    let state = 'active';
+                    if(exp.toLowerCase().includes('ago') || exp.toLowerCase().includes('expired') || exp.toLowerCase().includes('deactive')) {
+                        state = 'deactive';
+                    }
+
+                    let pkgDate = 1;
+                    const match = exp.match(/\d{4}-\d{2}-(\d{2})/);
+                    if(match) {
+                        pkgDate = parseInt(match[1], 10);
+                        if(pkgDate > 30) pkgDate = 30;
+                    }
+
+                    let rowObj = {
+                        id: Date.now() + i,
+                        sr: count + 1,
+                        userId: userId,
+                        name: name,
+                        location: address,
+                        pkgDate: pkgDate,
+                        pkg: pkg,
+                        amount: "",
+                        remarks: "",
+                        state: state
+                    };
+                    customColumns.forEach(c => rowObj[c.key] = "");
+
+                    sheetData.push(rowObj);
+                    count++;
+                }
+                localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+                renderGrid();
+                alert(`Successfully imported ${count} users with dynamic columns support!`);
+            };
+            reader.readAsText(file);
+        }
+
+        function exportExcelCSV() {
+            let csvHeaders = ['Sr.No', 'UserID', 'Description', 'Location', 'PackageDate', 'Package', 'P.Amount'];
+            customColumns.forEach(c => csvHeaders.push(c.label));
+            csvHeaders.push('Remarks', 'State');
+            let csv = csvHeaders.join(',') + '\n';
+
+            sheetData.forEach((r, i) => {
+                let rowArr = [i + 1, r.userId || '', r.name, r.location, r.pkgDate, r.pkg, r.amount || ''];
+                customColumns.forEach(c => rowArr.push(r[c.key] || ''));
+                rowArr.push(r.remarks || '', r.state || 'active');
+                csv += rowArr.map(val => `"${val}"`).join(',') + '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = window.URL.createObjectURL(blob);
+            a.download = 'FastNet_Master_Payment_Sheet.csv';
+            a.click();
+        }
+
+        window.onload = renderGrid;
+    </script>
+</body>
+</html>
