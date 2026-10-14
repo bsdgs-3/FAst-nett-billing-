@@ -32,7 +32,7 @@
     <header class="bg-slate-800 text-white px-4 py-3 flex flex-wrap justify-between items-center gap-3 shadow-md z-30 flex-shrink-0">
         <div>
             <h1 class="font-bold text-lg">Fast Net Pakpattan - Payment Sheet</h1>
-            <p class="text-xs text-slate-400">Dynamic Columns & Hide Months Option</p>
+            <p class="text-xs text-slate-400">Permanent Data Persistence Storage</p>
         </div>
 
         <!-- Tabs -->
@@ -93,7 +93,10 @@
         let newRowId = null;
         let hideMonths = false;
         
-        // Default custom columns list if not present in storage
+        // Permanent storage keys so data never gets lost on updates
+        const STORAGE_KEY_DATA = 'fastnet_master_billing_data_v1';
+        const STORAGE_KEY_COLS = 'fastnet_master_billing_cols_v1';
+
         let defaultColumns = [
             { key: 'sep', label: 'Sep', type: 'text' },
             { key: 'oct', label: 'Oct', type: 'text' },
@@ -101,10 +104,15 @@
             { key: 'dec', label: 'Dec', type: 'text' }
         ];
 
-        let customColumns = JSON.parse(localStorage.getItem('fastnet_custom_cols_v22')) || defaultColumns;
-        let sheetData = JSON.parse(localStorage.getItem('fastnet_excel_grid_v22')) || [
+        let customColumns = JSON.parse(localStorage.getItem(STORAGE_KEY_COLS)) || defaultColumns;
+        let sheetData = JSON.parse(localStorage.getItem(STORAGE_KEY_DATA)) || [
             { id: Date.now(), sr: 1, userId: "sajid.ch", name: "Sajid Rasheed Academe", location: "Tibba", pkgDate: 21, pkg: "AN-10Mb", amount: "", sep: "", oct: "Paid", nov: "", dec: "", remarks: "", state: "active" }
         ];
+
+        function saveData() {
+            localStorage.setItem(STORAGE_KEY_DATA, JSON.stringify(sheetData));
+            localStorage.setItem(STORAGE_KEY_COLS, JSON.stringify(customColumns));
+        }
 
         function switchTab(tab) {
             currentTab = tab;
@@ -135,14 +143,19 @@
             if(!colName) return;
             let cleanKey = colName.toLowerCase().replace(/[^a-z0-9]/g, '_');
             
-            // Check duplicate
             if(customColumns.some(c => c.key === cleanKey)) {
                 alert("Column already exists!");
                 return;
             }
 
             customColumns.push({ key: cleanKey, label: colName, type: 'text' });
-            localStorage.setItem('fastnet_custom_cols_v22', JSON.stringify(customColumns));
+            
+            // Add new column property to existing rows
+            sheetData.forEach(row => {
+                if(row[cleanKey] === undefined) row[cleanKey] = "";
+            });
+
+            saveData();
             renderGrid();
             alert(`Column "${colName}" added successfully!`);
         }
@@ -153,7 +166,6 @@
             const theadTr = document.getElementById('tableHeaderRow');
             const tbody = document.getElementById('excelTableBody');
             
-            // 1. Render Table Headers Dynamically
             let headerHTML = `
                 <th>Sr.No.</th>
                 <th>User ID</th>
@@ -177,7 +189,6 @@
             `;
             theadTr.innerHTML = headerHTML;
 
-            // 2. Filter & Render Rows
             tbody.innerHTML = '';
             let filtered = sheetData.filter(row => {
                 const matchesTab = (row.state || 'active') === currentTab;
@@ -241,7 +252,7 @@
         function deleteColumn(key) {
             if(confirm(`Delete column "${key}" permanently?`)) {
                 customColumns = customColumns.filter(c => c.key !== key);
-                localStorage.setItem('fastnet_custom_cols_v22', JSON.stringify(customColumns));
+                saveData();
                 renderGrid();
             }
         }
@@ -264,7 +275,7 @@
             customColumns.forEach(c => newRowObj[c.key] = "");
             
             sheetData.unshift(newRowObj);
-            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            saveData();
             renderGrid();
         }
 
@@ -273,27 +284,26 @@
             if (sheetData[idx].id === newRowId) {
                 newRowId = null;
             }
-            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            saveData();
             renderGrid();
         }
 
         function toggleState(idx) {
             sheetData[idx].state = (sheetData[idx].state || 'active') === 'active' ? 'deactive' : 'active';
-            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+            saveData();
             renderGrid();
         }
 
         function updateCell(idx, field, val) {
             sheetData[idx][field] = val;
-            localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
-            renderGrid();
+            saveData();
         }
 
         function deleteRow(idx) {
             if(confirm("Delete this row permanently?")) {
                 if (sheetData[idx].id === newRowId) newRowId = null;
                 sheetData.splice(idx, 1);
-                localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+                saveData();
                 renderGrid();
             }
         }
@@ -387,9 +397,9 @@
                     sheetData.push(rowObj);
                     count++;
                 }
-                localStorage.setItem('fastnet_excel_grid_v22', JSON.stringify(sheetData));
+                saveData();
                 renderGrid();
-                alert(`Successfully imported ${count} users with dynamic columns support!`);
+                alert(`Successfully imported ${count} users with permanent storage saved!`);
             };
             reader.readAsText(file);
         }
